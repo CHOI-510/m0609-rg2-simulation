@@ -1,0 +1,76 @@
+<?xml version="1.0"?>
+<robot name="m0609" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="rg2" default="false"/>
+  <xacro:include filename="$(find dsr_description2)/xacro/macro.m0609.white.xacro"/>
+  <xacro:m0609 namespace="" simple="true"/>
+
+  <xacro:if value="$(arg rg2)">
+    <xacro:include filename="$(find m0609_rg2_bringup)/urdf/onrobot_rg2_model_macro.xacro"/>
+    <link name="tool0"/>
+    <joint name="joint_6-tool0" type="fixed">
+      <parent link="link_6"/>
+      <child link="tool0"/>
+      <origin xyz="0 0 0" rpy="${pi} ${-pi/2} 0"/>
+    </joint>
+
+    <!-- Reuse the installed geometry and mimic joints without the Classic assembly macro. -->
+    <xacro:base_link prefix="rg2_" effector_base="tool0"/>
+    <xacro:finger_links prefix="rg2_" fingerprefix="left"/>
+    <xacro:finger_links prefix="rg2_" fingerprefix="right"/>
+    <xacro:finger_joint prefix="rg2_"/>
+    <xacro:right_outer_knuckle_joint prefix="rg2_"/>
+
+    <!-- Nominal fingertip center in the RG2 mesh frame. -->
+    <link name="rg2_tcp"/>
+    <joint name="rg2_tcp_fixed" type="fixed">
+      <parent link="rg2_base_link"/>
+      <child link="rg2_tcp"/>
+      <origin xyz="0 0 0.217" rpy="0 0 0"/>
+    </joint>
+  </xacro:if>
+
+  <link name="world"/>
+  <joint name="world_fixed" type="fixed">
+    <parent link="world"/>
+    <child link="base_link"/>
+  </joint>
+
+  <xacro:macro name="controlled_joint" params="name command:=true">
+    <joint name="${name}">
+      <xacro:if value="${command}">
+        <command_interface name="position"/>
+      </xacro:if>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+  </xacro:macro>
+
+  <ros2_control name="M0609GazeboSystem" type="system">
+    <hardware>
+      <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+    </hardware>
+    <xacro:controlled_joint name="joint_1"/>
+    <xacro:controlled_joint name="joint_2"/>
+    <xacro:controlled_joint name="joint_3"/>
+    <xacro:controlled_joint name="joint_4"/>
+    <xacro:controlled_joint name="joint_5"/>
+    <xacro:controlled_joint name="joint_6"/>
+    <xacro:if value="$(arg rg2)">
+      <xacro:controlled_joint name="rg2_finger_joint"/>
+      <xacro:controlled_joint name="rg2_right_outer_knuckle_joint" command="false"/>
+      <xacro:controlled_joint name="rg2_left_inner_knuckle_joint" command="false"/>
+      <xacro:controlled_joint name="rg2_right_inner_knuckle_joint" command="false"/>
+      <xacro:controlled_joint name="rg2_left_inner_finger_joint" command="false"/>
+      <xacro:controlled_joint name="rg2_right_inner_finger_joint" command="false"/>
+    </xacro:if>
+  </ros2_control>
+
+  <gazebo>
+    <plugin filename="libgz_ros2_control-system.so"
+            name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <parameters>$(find m0609_gz)/config/controllers.yaml</parameters>
+    </plugin>
+  </gazebo>
+</robot>

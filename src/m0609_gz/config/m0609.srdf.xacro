@@ -1,0 +1,64 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="m0609" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="rg2" default="false"/>
+  <xacro:property name="with_rg2" value="$(arg rg2)"/>
+  <group name="manipulator">
+    <chain base_link="base_link" tip_link="${'rg2_tcp' if with_rg2 else 'link_6'}" />
+  </group>
+  <group_state name="all-zeros" group="manipulator">
+    <joint name="joint_1" value="0" />
+    <joint name="joint_2" value="0" />
+    <joint name="joint_3" value="0" />
+    <joint name="joint_4" value="0" />
+    <joint name="joint_5" value="0" />
+    <joint name="joint_6" value="0" />
+  </group_state>
+  <xacro:if value="${with_rg2}">
+    <group name="gripper">
+      <joint name="rg2_finger_joint"/>
+      <joint name="rg2_left_inner_finger_joint"/>
+      <joint name="rg2_left_inner_knuckle_joint"/>
+      <joint name="rg2_right_outer_knuckle_joint"/>
+      <joint name="rg2_right_inner_finger_joint"/>
+      <joint name="rg2_right_inner_knuckle_joint"/>
+    </group>
+    <group_state name="open" group="gripper">
+      <joint name="rg2_finger_joint" value="-0.50"/>
+    </group_state>
+    <group_state name="closed" group="gripper">
+      <joint name="rg2_finger_joint" value="0.70"/>
+    </group_state>
+    <end_effector name="rg2" parent_link="rg2_tcp" group="gripper" parent_group="manipulator"/>
+    <!-- The flange and the overlapping meshes at each finger's linkage. -->
+    <disable_collisions link1="link_6" link2="rg2_base_link" reason="Adjacent"/>
+    <xacro:macro name="rg2_linkage_contacts" params="side">
+      <disable_collisions link1="rg2_base_link" link2="rg2_${side}_inner_knuckle" reason="Adjacent"/>
+      <disable_collisions link1="rg2_base_link" link2="rg2_${side}_outer_knuckle" reason="Adjacent"/>
+      <disable_collisions link1="rg2_${side}_inner_finger" link2="rg2_${side}_inner_knuckle" reason="Adjacent"/>
+      <disable_collisions link1="rg2_${side}_inner_finger" link2="rg2_${side}_outer_knuckle" reason="Adjacent"/>
+      <disable_collisions link1="rg2_${side}_inner_knuckle" link2="rg2_${side}_outer_knuckle" reason="Adjacent"/>
+    </xacro:macro>
+    <xacro:rg2_linkage_contacts side="left"/>
+    <xacro:rg2_linkage_contacts side="right"/>
+  </xacro:if>
+  <group_state name="base-turn" group="manipulator">
+    <joint name="joint_1" value="0.5" />
+    <joint name="joint_2" value="0" />
+    <joint name="joint_3" value="0" />
+    <joint name="joint_4" value="0" />
+    <joint name="joint_5" value="0" />
+    <joint name="joint_6" value="0" />
+  </group_state>
+  <disable_collisions link1="base_link" link2="link_1" reason="Adjacent" />
+  <disable_collisions link1="link_1" link2="link_2" reason="Adjacent" />
+  <disable_collisions link1="link_1" link2="link_3" reason="Never" />
+  <disable_collisions link1="link_2" link2="link_3" reason="Adjacent" />
+  <disable_collisions link1="link_2" link2="link_5" reason="Never" />
+  <disable_collisions link1="link_2" link2="link_6" reason="Never" />
+  <disable_collisions link1="link_3" link2="link_4" reason="Adjacent" />
+  <disable_collisions link1="link_3" link2="link_5" reason="Never" />
+  <disable_collisions link1="link_3" link2="link_6" reason="Never" />
+  <disable_collisions link1="link_4" link2="link_5" reason="Adjacent" />
+  <disable_collisions link1="link_4" link2="link_6" reason="Never" />
+  <disable_collisions link1="link_5" link2="link_6" reason="Adjacent" />
+</robot>

@@ -1,0 +1,67 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="pick">
+    <gravity>0 0 -9.81</gravity>
+    <physics name="pick" type="dart">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-contact-system" name="gz::sim::systems::Contact"/>
+    <light name="sun" type="directional">
+      <pose>0 0 5 0 0 0</pose>
+      <direction>-0.5 0.2 -1</direction>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+    </light>
+    <model name="ground">
+      <static>true</static>
+      <link name="link">
+        <collision name="ground"><geometry><plane><normal>0 0 1</normal></plane></geometry></collision>
+        <visual name="ground_visual"><geometry><plane><normal>0 0 1</normal><size>8 8</size></plane></geometry></visual>
+      </link>
+    </model>
+    <model name="table">
+      <static>true</static>
+      <pose>0.47 0 0.15 0 0 0</pose>
+      <link name="link">
+        <collision name="table">
+          <geometry><box><size>0.28 0.24 0.30</size></box></geometry>
+          <surface><friction><ode><mu>1</mu><mu2>1</mu2></ode></friction></surface>
+        </collision>
+        <visual name="table_visual">
+          <geometry><box><size>0.28 0.24 0.30</size></box></geometry>
+          <material><diffuse>0.28 0.38 0.44 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="cube">
+      <pose>0.47 0 0.32 0 0 0</pose>
+      <link name="link">
+        <inertial>
+          <mass>0.064</mass>
+          <inertia><ixx>0.0000170666667</ixx><iyy>0.0000170666667</iyy><izz>0.0000170666667</izz></inertia>
+        </inertial>
+        <collision name="cube">
+          <geometry><box><size>0.04 0.04 0.04</size></box></geometry>
+          <surface><friction><ode><mu>1.2</mu><mu2>1.2</mu2></ode></friction></surface>
+        </collision>
+        <visual name="cube_visual">
+          <geometry><box><size>0.04 0.04 0.04</size></box></geometry>
+          <material><diffuse>0.9 0.34 0.1 1</diffuse></material>
+        </visual>
+        <sensor name="cube_contact" type="contact">
+          <always_on>true</always_on>
+          <contact><collision>cube</collision><topic>/pick/contacts</topic></contact>
+        </sensor>
+      </link>
+      <plugin filename="gz-sim-pose-publisher-system" name="gz::sim::systems::PosePublisher">
+        <publish_link_pose>false</publish_link_pose>
+        <publish_model_pose>true</publish_model_pose>
+        <use_pose_vector_msg>true</use_pose_vector_msg>
+        <update_frequency>100</update_frequency>
+      </plugin>
+    </model>
+  </world>
+</sdf>

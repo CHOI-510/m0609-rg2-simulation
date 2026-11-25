@@ -1,0 +1,341 @@
+#!/usr/bin/env python3
+"""Plan a pick with MoveIt, send those trajectories to Gazebo, and log both."""
+import argparse
+import json
+import hashlib
+from pathlib import Path
+import time
+
+from action_msgs.msg import GoalStatus
+from control_msgs.action import FollowJointTrajectory
+from control_msgs.msg import JointTolerance
+from geometry_msgs.msg import Pose
+from moveit_msgs.msg import (
+    AllowedCollisionEntry, CollisionObject, Constraints, JointConstraint,
+    PlanningScene, PlanningSceneComponents,
+)
+from moveit_msgs.srv import ApplyPlanningScene, GetMotionPlan, GetPlanningScene
+import rclpy
+from rclpy.action import ActionClient
+from rclpy.duration import Duration
+from rclpy.node import Node
+from rclpy.time import Time
+from ros_gz_interfaces.msg import Contacts
+from sensor_msgs.msg import JointState
+from shape_msgs.msg import SolidPrimitive
+from tf2_msgs.msg import TFMessage
+from tf2_ros import Buffer, TransformException, TransformListener
+
+ARM = [f'joint_{i}' for i in range(1, 7)]
+GRIP = 'rg2_finger_joint'
+NAMES = ARM + [GRIP]
+ABOVE = [-.01330349, .50481072, .32346998, .00054814, 2.31311204, -1.58393328]
+AT_CUBE = [-.01326659, .31322084, .88905511, .00043296, 1.93911680, -1.58411103]
+FINGERS = [f'rg2_{side}_inner_finger' for side in ('left', 'right')]
+
+
+def seconds(stamp):
+    return stamp.sec + stamp.nanosec * 1e-9
+
+
+def pose_values(position, rotation):
+    return [position.x, position.y, position.z, rotation.x, rotation.y, rotation.z, rotation.w]
+
+
+def save(path, payload):
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(payload, indent=2, allow_nan=False) + '\n')
+    temporary.replace(path)
+
+
+class Recorder(Node):
+    def __init__(self):
+        super().__init__('record_pick')
+        self.joints = {}
+        self.joint_time = None
+        self.cube = None
+        self.cube_time = None
+        self.contacts = []
+        self.contact_time = None
+        self.contact_messages = 0
+        self.samples = []
+        self.phase = None
+        self.origin = 0.0
+        self.tf = Buffer()
+        self.listener = TransformListener(self.tf, self)
+        self.create_subscription(JointState, '/joint_states', self.on_joints, 10)
+        self.create_subscription(TFMessage, '/model/cube/pose', self.on_cube, 10)
+        self.create_subscription(Contacts, '/pick/contacts', self.on_contacts, 10)
+        self.plan_client = self.create_client(GetMotionPlan, '/plan_kinematic_path')
+        self.get_scene = self.create_client(GetPlanningScene, '/get_planning_scene')
+        self.apply_scene = self.create_client(ApplyPlanningScene, '/apply_planning_scene')
+        self.controllers = {
+            'manipulator': ActionClient(self, FollowJointTrajectory,
+                                         '/joint_trajectory_controller/follow_joint_trajectory'),
+            'gripper': ActionClient(self, FollowJointTrajectory,
+                                     '/rg2_controller/follow_joint_trajectory'),
+        }
+
+    def now(self):
+        return self.get_clock().now().nanoseconds * 1e-9
+
+    def on_joints(self, msg):
+        self.joints.update(zip(msg.name, msg.position))
+        self.joint_time = seconds(msg.header.stamp)
+
+    def on_cube(self, msg):
+        for item in msg.transforms:
+            if item.child_frame_id.split('::')[-1] == 'cube':
+                self.cube = pose_values(item.transform.translation, item.transform.rotation)
+                self.cube_time = seconds(item.header.stamp)
+
+    def on_contacts(self, msg):
+        self.contact_time = seconds(msg.header.stamp) if msg.header.stamp.sec or msg.header.stamp.nanosec else self.now()
+        self.contact_messages += 1
+        self.contacts = sorted({
+            name for contact in msg.contacts
+            for name in (contact.collision1.name, contact.collision2.name)
+            if name
+        })
+
+    def sample(self):
+        if self.phase is None or not all(name in self.joints for name in NAMES):
+            return
+        elapsed = self.now() - self.origin
+        if self.samples and elapsed - self.samples[-1]['time_s'] < .01:
+            return
+        try:
+            tf = self.tf.lookup_transform('world', 'rg2_tcp', Time())
+            tcp = pose_values(tf.transform.translation, tf.transform.rotation)
+            tcp_time = seconds(tf.header.stamp)
+        except TransformException:
+            tcp, tcp_time = None, None
+        contact_age = None if self.contact_time is None else self.now() - self.contact_time
+        self.samples.append({
+            'phase': self.phase, 'time_s': elapsed,
+            'positions_rad': [self.joints[name] for name in NAMES],
+            'joint_time_s': self.joint_time, 'tcp_pose': tcp, 'tcp_time_s': tcp_time,
+            'cube_pose': self.cube, 'cube_time_s': self.cube_time,
+            'contact_time_s': self.contact_time,
+            'contacts': self.contacts if contact_age is not None and abs(contact_age) < .04 else [],
+        })
+
+    def wait(self, condition, label, timeout=40):
+        deadline = time.monotonic() + timeout
+        while not condition():
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f'timed out: {label}')
+            rclpy.spin_once(self, timeout_sec=.01)
+            self.sample()
+
+    def pause(self, duration):
+        until = self.now() + duration
+        self.wait(lambda: self.now() >= until, 'simulated clock')
+
+    def request(self, client, request):
+        if not client.wait_for_service(timeout_sec=30):
+            raise RuntimeError(f'service not available: {client.srv_name}')
+        future = client.call_async(request)
+        self.wait(future.done, client.srv_name)
+        return future.result()
+
+    def scene(self, allow_fingers):
+        request = GetPlanningScene.Request(components=PlanningSceneComponents(
+            components=PlanningSceneComponents.ALLOWED_COLLISION_MATRIX))
+        matrix = self.request(self.get_scene, request).scene.allowed_collision_matrix
+        names = matrix.entry_names
+        if 'cube' not in names:
+            names.append('cube')
+            for row in matrix.entry_values:
+                row.enabled.append(False)
+            matrix.entry_values.append(AllowedCollisionEntry(enabled=[False]*len(names)))
+        for finger in FINGERS:
+            a, b = names.index('cube'), names.index(finger)
+            matrix.entry_values[a].enabled[b] = allow_fingers
+            matrix.entry_values[b].enabled[a] = allow_fingers
+        scene = PlanningScene(is_diff=True, allowed_collision_matrix=matrix)
+        for name, dimensions, center in [
+            ('table', [.28, .24, .30], [.47, 0., .15]),
+            ('cube', [.04, .04, .04], [.47, 0., .32]),
+        ]:
+            item = CollisionObject(id=name, operation=CollisionObject.ADD)
+            item.header.frame_id = 'world'
+            pose = Pose()
+            pose.position.x, pose.position.y, pose.position.z = center
+            item.primitives = [SolidPrimitive(type=SolidPrimitive.BOX, dimensions=dimensions)]
+            item.primitive_poses = [pose]
+            scene.world.collision_objects.append(item)
+        if not self.request(self.apply_scene, ApplyPlanningScene.Request(scene=scene)).success:
+            raise RuntimeError('failed to apply pick planning scene')
+
+    def plan(self, group, goals, start=None):
+        request = GetMotionPlan.Request()
+        spec = request.motion_plan_request
+        spec.group_name = group
+        spec.pipeline_id = 'ompl'
+        spec.allowed_planning_time = 5.
+        spec.num_planning_attempts = 2
+        spec.max_velocity_scaling_factor = .35
+        spec.max_acceleration_scaling_factor = .35
+        spec.start_state.is_diff = True
+        if start is not None:
+            spec.start_state.joint_state.name = list(start)
+            spec.start_state.joint_state.position = list(start.values())
+        spec.goal_constraints = [Constraints(joint_constraints=[
+            JointConstraint(joint_name=name, position=value,
+                            tolerance_above=.00005, tolerance_below=.00005, weight=1.)
+            for name, value in goals.items()
+        ])]
+        response = self.request(self.plan_client, request).motion_plan_response
+        if response.error_code.val != 1:
+            raise RuntimeError(f'{group} planning failed: {response.error_code.val} '
+                               f'{response.error_code.message}')
+        trajectory = response.trajectory.joint_trajectory
+        names = ARM if group == 'manipulator' else [GRIP]
+        indexes = [trajectory.joint_names.index(name) for name in names]
+        for point in trajectory.points:
+            for attr in ('positions', 'velocities', 'accelerations', 'effort'):
+                values = getattr(point, attr)
+                if len(values):
+                    setattr(point, attr, [values[index] for index in indexes])
+        trajectory.joint_names = names
+        return trajectory
+
+    def execute(self, group, trajectory, stamp=None, on_accept=None, grasp=False):
+        client = self.controllers[group]
+        if not client.wait_for_server(timeout_sec=20):
+            raise RuntimeError(f'no controller for {group}')
+        if stamp is not None:
+            trajectory.header.stamp = stamp
+        goal = FollowJointTrajectory.Goal(trajectory=trajectory)
+        if grasp:
+            # A cube should stop the fingers before the free-space endpoint.
+            goal.goal_tolerance = [JointTolerance(name=GRIP, position=-1.)]
+        future = client.send_goal_async(goal)
+        self.wait(future.done, f'{group} goal acceptance')
+        handle = future.result()
+        if not handle.accepted:
+            raise RuntimeError(f'{group} goal rejected')
+        if on_accept:
+            on_accept()
+        future = handle.get_result_async()
+        try:
+            self.wait(future.done, f'{group} trajectory result', timeout=90)
+        except RuntimeError:
+            cancel = handle.cancel_goal_async()
+            self.wait(cancel.done, f'{group} cancellation', timeout=5)
+            raise
+        outcome = future.result()
+        if outcome.status != GoalStatus.STATUS_SUCCEEDED or outcome.result.error_code != 0:
+            raise RuntimeError(f'{group} control failed: {outcome.status} '
+                               f'{outcome.result.error_code} {outcome.result.error_string}')
+
+
+def run(node, command_path, report_path):
+    command = {'schema': 'm0609.pick.v1', 'source': 'MoveIt GetMotionPlan',
+               'frame': 'world', 'phases': []}
+    report = {'simulator': 'Gazebo', 'joint_names': NAMES, 'samples': node.samples,
+              'trajectory_complete': False, 'grasp_success': None, 'stage': 'startup'}
+    try:
+        if not node.get_parameter('use_sim_time').value:
+            raise RuntimeError('record_pick requires --ros-args -p use_sim_time:=true')
+        node.wait(lambda: node.now() > 0 and node.cube is not None
+                  and all(name in node.joints for name in NAMES), 'clock, joints and cube pose')
+        node.scene(False)
+        report['stage'] = 'setup'
+        node.execute('gripper', node.plan('gripper', {GRIP: -.5}))
+        node.execute('manipulator', node.plan('manipulator', dict(zip(ARM, ABOVE))))
+        node.pause(.5)
+        start = {name: node.joints[name] for name in NAMES}
+        command['initial_positions_rad'] = start.copy()
+        report['start_cube_pose'] = node.cube
+        node.origin = node.now()
+        report['clock_origin_s'] = node.origin
+        node.phase = 'initial'
+        node.sample()
+        for phase, group, goal, dwell in [
+            ('approach', 'manipulator', dict(zip(ARM, AT_CUBE)), .25),
+            ('close', 'gripper', {GRIP: .70}, .45),
+            ('lift', 'manipulator', dict(zip(ARM, ABOVE)), .0),
+        ]:
+            report['stage'] = phase
+            node.phase = None
+            if phase == 'close':
+                node.scene(True)
+            trajectory = node.plan(group, goal, start)
+            stamp = (node.get_clock().now() + Duration(seconds=.25)).to_msg()
+            node.phase = phase
+            phase_record = {'name': phase, 'joint_names': list(trajectory.joint_names),
+                            'gazebo_start_s': seconds(stamp) - node.origin,
+                            'dwell_s': dwell,
+                            'allow_gripper_position_error': phase == 'close', 'points': [
+                {'time_s': seconds(point.time_from_start), 'positions_rad': list(point.positions),
+                 'velocities_rad_s': list(point.velocities),
+                 'accelerations_rad_s2': list(point.accelerations)}
+                for point in trajectory.points
+            ]}
+            def record_accepted():
+                command['phases'].append(phase_record)
+                save(command_path, command)
+            node.execute(group, trajectory, stamp, record_accepted, grasp=phase == 'close')
+            if dwell:
+                node.pause(dwell)
+            start.update(zip(trajectory.joint_names, trajectory.points[-1].positions))
+        report['trajectory_complete'] = True
+        report['stage'] = 'hold'
+        node.phase = 'hold'
+        hold_start = node.now()
+        node.pause(1.08)
+        baseline = report['start_cube_pose'][2]
+        rows = [row for row in node.samples if row['phase'] == 'hold'
+                and row['time_s'] >= hold_start - node.origin and row['cube_pose'] is not None]
+        pose_times = sorted({row['cube_time_s'] for row in rows})
+        span = pose_times[-1] - pose_times[0] if pose_times else 0.
+        largest_gap = max((second - first for first, second in zip(pose_times, pose_times[1:])),
+                          default=0.)
+        report['hold_max_pose_gap_s'] = largest_gap
+        report['hold_sample_span_s'] = span
+        report['hold_min_rise_m'] = min((row['cube_pose'][2] - baseline for row in rows), default=None)
+        report['peak_rise_m'] = max(row['cube_pose'][2] - baseline for row in node.samples
+                                    if row['cube_pose'] is not None)
+        required = ('rg2_left_inner_finger', 'rg2_right_inner_finger')
+        bilateral = all(all(any(finger in name for name in row['contacts']) for finger in required)
+                        and not any('table' in name or 'ground' in name for name in row['contacts'])
+                        for row in rows)
+        report['bilateral_during_hold'] = bilateral and bool(rows)
+        height_passed = span >= 1. and largest_gap <= .05 and report['hold_min_rise_m'] >= .05
+        report['grasp_success'] = bool(height_passed and bilateral)
+        if not report['grasp_success']:
+            report['failure_reason'] = ('hold height or telemetry coverage' if not height_passed
+                                        else 'bilateral pad contact not confirmed')
+        report['stage'] = 'complete'
+    except (RuntimeError, ValueError) as error:
+        report['error'] = str(error)
+    finally:
+        report['contact_messages'] = node.contact_messages
+        if command_path.exists():
+            report['trajectory_sha256'] = hashlib.sha256(command_path.read_bytes()).hexdigest()
+        save(report_path, report)
+        print(json.dumps({key: value for key, value in report.items() if key != 'samples'}))
+    return 0 if report['trajectory_complete'] else 1
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('output', type=Path)
+    args, ros_args = parser.parse_known_args()
+    args.output.mkdir(parents=True, exist_ok=True)
+    command, report = (args.output / name for name in ('trajectory.json', 'gazebo.json'))
+    if command.exists() or report.exists():
+        parser.error('use a fresh output directory')
+    rclpy.init(args=ros_args)
+    node = Recorder()
+    try:
+        return run(node, command, report)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

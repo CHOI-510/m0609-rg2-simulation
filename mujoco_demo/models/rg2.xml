@@ -1,0 +1,60 @@
+<mujoco>
+  <!-- Joint frames, inertias, and mimic coefficients from the expanded RG2 Xacro.
+       Pad boxes approximate the contact faces of the two inner-finger meshes. -->
+  <asset>
+    <mesh name="rg2_base_link" file="rg2/base_link.stl" />
+    <mesh name="rg2_outer_knuckle" file="rg2/outer_knuckle.stl" />
+    <mesh name="rg2_inner_knuckle" file="rg2/inner_knuckle.stl" />
+    <mesh name="rg2_inner_finger" file="rg2/inner_finger.stl" />
+  </asset>
+  <worldbody>
+    <body name="rg2_mount">
+      <body name="tool0" pos="0 0 0" quat="4.32978028118e-17 0.707106781187 -4.32978028118e-17 0.707106781187">
+        <body name="rg2_base_link" pos="0. 0. 0." quat="0.499998163397 0.499999999997 0.500001836603 0.499999999997">
+          <inertial pos="0.0 0.0 0.0" mass="0.7" fullinertia="1.0E-03 1.0E-03 1.0E-03 1.0E-06 1.0E-06 1.0E-06" />
+          <geom type="mesh" mesh="rg2_base_link" rgba="0.8 0.8 0.8 1" contype="0" conaffinity="0" group="1" />
+          <body name="rg2_left_outer_knuckle" pos="0 -0.017178 0.125797" quat="1 0 0 0">
+            <inertial pos="0.0 0.0 0.0" mass="0.05" fullinertia="1.0E-03 1.0E-03 1.0E-03 1.0E-06 1.0E-06 1.0E-06" />
+            <joint name="rg2_finger_joint" axis="-1 0 0" range="-0.558505 0.785398" damping="0.25" armature=".001" />
+            <geom type="mesh" mesh="rg2_outer_knuckle" rgba="0.8 0.8 0.8 1" contype="0" conaffinity="0" group="1" />
+            <body name="rg2_left_inner_finger" pos="0 -0.039592 0.038177000000000016" quat="1 0 0 0">
+              <inertial pos="0.0 0.0 0.0" mass="0.05" fullinertia="1.0E-03 1.0E-03 1.0E-03 1.0E-06 1.0E-06 1.0E-06" />
+              <joint name="rg2_left_inner_finger_joint" axis="1 0 0" range="-0.872665 0.872665" damping="0.25" armature=".001" />
+              <geom type="mesh" mesh="rg2_inner_finger" rgba="0.1 0.1 0.1 1" contype="0" conaffinity="0" group="1" />
+              <geom name="rg2_left_pad" type="box" pos="0 .016 .042" size=".009 .003 .010" rgba=".12 .12 .12 1" group="2" contype="2" conaffinity="4" friction="1.2 .005 .0001" condim="4" />
+            </body>
+          </body>
+          <body name="rg2_left_inner_knuckle" pos="0 -0.007678 0.1422970" quat="1 0 0 0">
+            <inertial pos="0.0 0.0 0.0" mass="0.05" fullinertia="1.0E-03 1.0E-03 1.0E-03 1.0E-06 1.0E-06 1.0E-06" />
+            <joint name="rg2_left_inner_knuckle_joint" axis="1 0 0" range="-0.785398 0.785398" damping="0.25" armature=".001" />
+            <geom type="mesh" mesh="rg2_inner_knuckle" rgba="0.8 0.8 0.8 1" contype="0" conaffinity="0" group="1" />
+          </body>
+          <body name="rg2_right_outer_knuckle" pos="0 0.017178 0.125797" quat="6.12323399574e-17 0 0 1">
+            <inertial pos="0.0 0.0 0.0" mass="0.05" fullinertia="1.0E-03 1.0E-03 1.0E-03 1.0E-06 1.0E-06 1.0E-06" />
+            <joint name="rg2_right_outer_knuckle_joint" axis="1 0 0" range="-0.785398 0.785398" damping="0.25" armature=".001" />
+            <geom type="mesh" mesh="rg2_outer_knuckle" rgba="0.8 0.8 0.8 1" contype="0" conaffinity="0" group="1" />
+            <body name="rg2_right_inner_finger" pos="0 -0.039592 0.038177000000000016" quat="1 0 0 0">
+              <inertial pos="0.0 0.0 0.0" mass="0.05" fullinertia="1.0E-03 1.0E-03 1.0E-03 1.0E-06 1.0E-06 1.0E-06" />
+              <joint name="rg2_right_inner_finger_joint" axis="1 0 0" range="-0.872665 0.872665" damping="0.25" armature=".001" />
+              <geom type="mesh" mesh="rg2_inner_finger" rgba="0.1 0.1 0.1 1" contype="0" conaffinity="0" group="1" />
+              <geom name="rg2_right_pad" type="box" pos="0 .016 .042" size=".009 .003 .010" rgba=".12 .12 .12 1" group="2" contype="2" conaffinity="4" friction="1.2 .005 .0001" condim="4" />
+            </body>
+          </body>
+          <body name="rg2_right_inner_knuckle" pos="0 0.007678 0.1422970" quat="6.12323399574e-17 0 0 -1">
+            <inertial pos="0.0 0.0 0.0" mass="0.05" fullinertia="1.0E-03 1.0E-03 1.0E-03 1.0E-06 1.0E-06 1.0E-06" />
+            <joint name="rg2_right_inner_knuckle_joint" axis="1 0 0" range="-0.785398 0.785398" damping="0.25" armature=".001" />
+            <geom type="mesh" mesh="rg2_inner_knuckle" rgba="0.8 0.8 0.8 1" contype="0" conaffinity="0" group="1" />
+          </body>
+          <site name="rg2_tcp" pos="0 0 0.217" size=".005" rgba=".2 .8 .3 1" />
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <equality>
+    <joint joint1="rg2_left_inner_knuckle_joint" joint2="rg2_finger_joint" polycoef="0 -1 0 0 0" solref=".004 1" solimp=".995 .999 .001" />
+    <joint joint1="rg2_left_inner_finger_joint" joint2="rg2_finger_joint" polycoef="0 1 0 0 0" solref=".004 1" solimp=".995 .999 .001" />
+    <joint joint1="rg2_right_outer_knuckle_joint" joint2="rg2_finger_joint" polycoef="0 -1 0 0 0" solref=".004 1" solimp=".995 .999 .001" />
+    <joint joint1="rg2_right_inner_knuckle_joint" joint2="rg2_finger_joint" polycoef="0 -1 0 0 0" solref=".004 1" solimp=".995 .999 .001" />
+    <joint joint1="rg2_right_inner_finger_joint" joint2="rg2_finger_joint" polycoef="0 1 0 0 0" solref=".004 1" solimp=".995 .999 .001" />
+  </equality>
+</mujoco>
