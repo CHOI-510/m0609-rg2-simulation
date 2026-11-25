@@ -1,5 +1,6 @@
 """Load the commanded ROS trajectories and replay them in simulation time."""
 from bisect import bisect_right
+from contextlib import nullcontext
 from dataclasses import dataclass
 import hashlib
 import json
@@ -180,27 +181,41 @@ class Replay:
         }
 
 
-def run_replay(path, episodes, output=None):
+def run_replay(path, episodes, output=None, viewer_factory=None):
     trajectory = Trajectory(path)
     replay = Replay(trajectory)
     results = []
     reference = None
-    for index in range(1, episodes + 1):
-        replay.reset()
-        state = np.r_[replay.pick.data.qpos, replay.pick.data.qvel, replay.pick.data.ctrl]
-        if reference is None:
-            reference = state
-        replay.advance(replay.final_tick)
-        summary = {'episode': index, 'reset_matches': bool(np.array_equal(state, reference)),
-                   **replay.summary()}
-        results.append(summary)
-        print(json.dumps(summary))
-        if index == 1:
-            samples = replay.samples
+    samples = []
+    interrupted = False
+    context = viewer_factory(replay.pick) if viewer_factory else nullcontext()
+    with context as viewer:
+        while True:
+            replay.reset()
+            data = replay.pick.data
+            state = np.r_[data.qpos, data.qvel, data.ctrl]
+            if reference is None:
+                reference = state
+            if viewer is None:
+                replay.advance(replay.final_tick)
+            elif not viewer.play_replay(replay):
+                if viewer.is_running() and viewer.restart_requested:
+                    continue
+                interrupted = True
+                break
+            summary = {'episode': len(results) + 1,
+                       'reset_matches': bool(np.array_equal(state, reference)), **replay.summary()}
+            results.append(summary)
+            print(json.dumps(summary), flush=True)
+            if len(results) == 1:
+                samples = replay.samples
+            if len(results) >= episodes and (viewer is None or not viewer.replay_again(replay, summary)):
+                break
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps({
             'simulator': 'MuJoCo', 'trajectory_sha256': trajectory.digest,
             'joint_names': NAMES, 'episodes': results, 'first_episode_samples': samples,
         }, indent=2, allow_nan=False) + '\n')
-    return 0 if all(row['grasp_success'] and row['reset_matches'] for row in results) else 1
+    passed = all(row['grasp_success'] and row['reset_matches'] for row in results)
+    return 0 if not interrupted and len(results) >= episodes and passed else 1

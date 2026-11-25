@@ -74,7 +74,7 @@ export ROS_DOMAIN_ID=112 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 export GZ_PARTITION=m0609_pick_112
 ```
 
-독립 MuJoCo 모드에서는 아래 검사와 GUI를 사용할 수 있습니다. GUI에는 OpenGL을 지원하는 데스크톱 세션이 필요합니다. CLI에서 `--viewer`와 `--trajectory`는 별도 모드입니다.
+독립 MuJoCo 모드에서는 아래 검사와 GUI를 사용할 수 있습니다. GUI에는 OpenGL을 지원하는 데스크톱 세션이 필요합니다. `--trajectory … --viewer`를 함께 지정하면 기록 궤적을 같은 물리 스텝과 성공 판정으로 재생합니다. `--episodes`로 지정한 회차는 자동으로 재생하며, 마지막 자세를 표시한 뒤 **R**로 회차를 추가할 수 있습니다. `--report`를 지정하면 창을 닫을 때 완료된 회차를 저장합니다.
 
 ```bash
 python mujoco_demo/demo_pick.py --check-arm

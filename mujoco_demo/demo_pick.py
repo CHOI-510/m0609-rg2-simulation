@@ -56,13 +56,67 @@ class Viewer:
     def is_running(self):
         return not self.glfw.window_should_close(self.window)
 
-    def sync(self):
+    def sync(self, status=None):
         width, height = self.glfw.get_framebuffer_size(self.window)
         mujoco.mjv_updateScene(self.pick.model, self.pick.data, self.options, None,
                                self.camera, mujoco.mjtCatBit.mjCAT_ALL, self.scene)
-        mujoco.mjr_render(mujoco.MjrRect(0, 0, width, height), self.scene, self.context)
+        viewport = mujoco.MjrRect(0, 0, width, height)
+        mujoco.mjr_render(viewport, self.scene, self.context)
+        if status:
+            labels, values = status
+            mujoco.mjr_overlay(mujoco.mjtFont.mjFONT_NORMAL,
+                               mujoco.mjtGridPos.mjGRID_TOPLEFT,
+                               viewport, labels, values, self.context)
         self.glfw.swap_buffers(self.window)
         self.glfw.poll_events()
+
+    def replay_status(self, replay, result=None):
+        phase = replay.samples[-1]["phase"]
+        rise = (replay.pick.data.geom_xpos[replay.pick.cube, 2] - replay.initial_z) * 1000
+        hold = max(0, replay.tick - replay.lift_end_tick) * replay.dt
+        verdict = ""
+        hint = ""
+        if result is not None:
+            verdict = "PASS" if result["grasp_success"] and result["reset_matches"] else "FAIL"
+            hint = "재생 완료 · R: 다시 실행 · Esc: 닫기"
+        self.glfw.set_window_title(
+            self.window, f"M0609 + RG2 | {phase} | 상승 {rise:.1f} mm | 유지 {hold:.2f} s"
+                         + (f" | {verdict} | {hint}" if verdict else "")
+        )
+        labels = "Phase\nCube rise\nHold"
+        values = f"{phase}\n{rise:.1f} mm\n{hold:.2f} s"
+        if verdict:
+            labels += "\nResult\nPlayback complete"
+            values += f"\n{verdict}\nR: Replay / Esc: Close"
+        return labels, values
+
+    def play_replay(self, replay):
+        glfw = self.glfw
+        self.restart_requested = False
+
+        def on_key(window, key, _scancode, action, _mods):
+            if action == glfw.PRESS:
+                if key == glfw.KEY_ESCAPE:
+                    glfw.set_window_should_close(window, True)
+                elif key == glfw.KEY_R:
+                    self.restart_requested = True
+
+        glfw.set_key_callback(self.window, on_key)
+        started = time.monotonic()
+        self.sync(self.replay_status(replay))
+        while self.is_running() and not self.restart_requested and replay.tick < replay.final_tick:
+            replay.advance(min(replay.tick + 10, replay.final_tick))
+            self.sync(self.replay_status(replay))
+            time.sleep(max(0., started + replay.tick * replay.dt - time.monotonic()))
+        return replay.tick == replay.final_tick
+
+    def replay_again(self, replay, result):
+        status = self.replay_status(replay, result)
+        self.sync(status)
+        while self.is_running() and not self.restart_requested:
+            self.glfw.wait_events_timeout(.05)
+            self.sync(status)
+        return self.is_running() and self.restart_requested
 
 
 class Pick:
@@ -203,7 +257,7 @@ def check_gripper():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--viewer", action="store_true", help="play the sequence in a GUI")
+    parser.add_argument("--viewer", action="store_true", help="play the sequence in a GUI")
     mode.add_argument("--check-arm", action="store_true", help="check the upstream arm")
     mode.add_argument("--check-gripper", action="store_true", help="check RG2 open/close and mimic")
     mode.add_argument("--trajectory", type=Path, help="replay a recorded MoveIt trajectory")
@@ -212,6 +266,8 @@ def main():
     args = parser.parse_args()
     if args.episodes < 1:
         parser.error("--episodes must be positive")
+    if args.viewer and (args.check_arm or args.check_gripper):
+        parser.error("--viewer is only available for the pick demos")
     if args.check_arm:
         return 0 if check_arm() else 1
     if args.check_gripper:
@@ -224,7 +280,8 @@ def main():
             from replay import run_replay
 
         try:
-            return run_replay(args.trajectory, args.episodes, args.report)
+            return run_replay(args.trajectory, args.episodes, args.report,
+                              viewer_factory=Viewer if args.viewer else None)
         except ValueError as error:
             parser.error(str(error))
     if args.report:

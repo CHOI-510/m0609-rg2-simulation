@@ -22,6 +22,12 @@ python mujoco_demo/pick_env.py mujoco_demo/trajectories/moveit_pick.json
 
 성공하면 재생 명령은 회차별 JSON에 `"reset_matches": true`, `"grasp_success": true`를 출력합니다. `PickEnv` 검사는 행동값 0에서 직접 재생과 일치하면 `"baseline_matches": true`, 에피소드가 끝나면 `"terminated": true`를 출력합니다.
 
+데스크톱에서 같은 궤적을 보려면 아래 명령을 실행하세요. 뷰어는 현재 단계, 상자 상승량과 유지 시간을 표시합니다. 지정한 회차가 끝나면 최종 자세와 PASS/FAIL을 표시합니다. **R**로 처음부터 다시 실행하고 **Esc**로 닫습니다.
+
+```bash
+python mujoco_demo/demo_pick.py --trajectory mujoco_demo/trajectories/moveit_pick.json --viewer
+```
+
 기준 궤적의 이전 검증에서 Gazebo는 **1/1회, 최소 84.068 mm**, MuJoCo는 **10/10회, 최소 83.621 mm** 상승을 기록했습니다. 두 엔진에서 각각 양쪽 패드로 상자를 1초 이상 유지했습니다. [상세 검증 기록](docs/validation.md)
 
 ## 내 동작을 새로 만들기
