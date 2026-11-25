@@ -1,5 +1,7 @@
 # M0609 + RG2 실행 및 팀 인계 계획
 
+이 문서는 초기 마일스톤의 계획과 당시 상태를 보존한 기록이다. 현재 실행 절차와 결과는 [README](../README.md)와 [검증 기록](validation.md)을 참고한다.
+
 ## 현재 상태
 
 - Ubuntu 24.04, ROS 2 Jazzy, Gazebo Harmonic 8.15.0, MoveIt 2 2.12.4, gz_ros2_control 1.2.20은 기존 및 사전 확인 환경이다.
